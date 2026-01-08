@@ -1,0 +1,59 @@
+# NeuroFlow WebApp Production Dockerfile - FastAPI with Gunicorn
+FROM python:3.11-slim
+
+# Устанавливаем системные зависимости
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Создаем пользователя для безопасности
+RUN useradd --create-home --shell /bin/bash --uid 1000 webapp
+
+# Устанавливаем рабочую директорию
+WORKDIR /app
+
+# Копируем requirements
+COPY requirements.txt .
+
+# Устанавливаем Python зависимости с оптимизацией
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir gunicorn uvicorn[standard] && \
+    pip cache purge
+
+# Копируем код приложения
+COPY . .
+
+# Добавляем родительскую директорию в Python path для импортов
+RUN ln -sf /app/../app /app/app_modules
+
+# Создаем необходимые директории
+RUN mkdir -p logs static && \
+    chown -R webapp:webapp /app && \
+    chmod -R 755 /app
+
+# Переключаемся на пользователя webapp
+USER webapp
+
+# Устанавливаем переменные окружения
+ENV PYTHONPATH=/app:/app/..
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV ENVIRONMENT=production
+
+# Создаем gunicorn конфигурацию
+COPY gunicorn.conf.py .
+
+# Проверка здоровья
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+# Экспонируем порт
+EXPOSE 8080
+
+# Команда запуска через Gunicorn с оптимизацией
+CMD ["gunicorn", "--config", "gunicorn.conf.py", "main:app"]
